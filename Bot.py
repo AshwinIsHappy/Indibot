@@ -8,7 +8,7 @@ from datetime import datetime
 
 Enter your Lichess API token and engine path
 lichess_token = TokenTimeIsBackBuddyss
-engine_path = r"./stockfish"
+engine_path = r"stockfish"
 
 Check if the engine file exists
 if not os.path.exists(engine_path):
