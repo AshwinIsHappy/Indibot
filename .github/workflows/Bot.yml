@@ -40,4 +40,4 @@ jobs:
           chmod +x ./stockfish
 
       - name: Running bot
-        run: python bot.py
+        run: python Bot.py
