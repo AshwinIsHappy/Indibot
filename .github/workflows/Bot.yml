@@ -9,7 +9,7 @@ on:
     branches:
       - "main"
     paths:
-      - "user_interface.py"
+      - "Bot.py"
   schedule:
     - cron: "1 */5 * * *"
 
