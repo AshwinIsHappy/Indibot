@@ -33,11 +33,11 @@ jobs:
         uses: py-actions/py-dependency-install@v4.0.0
         
       - name: Injection For my Repo
-        run: sed -i "s/TokenTimeIsBackBuddyss/${{ secrets.LICHESS_KEY }}/g" config.yml
+        run: sed -i "s/TokenTimeIsBackBuddyss/${{ secrets.LICHESS_KEY }}/g" bot.py
           
       - name: Stockfish
         run: |
-          chmod +x ./engines/stockfish
+          chmod +x ./stockfish
 
       - name: Running bot
-        run: python user_interface.py --matchmaking
+        run: python bot.py
