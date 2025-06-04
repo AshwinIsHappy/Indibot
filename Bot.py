@@ -6,11 +6,11 @@ import time
 import os
 from datetime import datetime
 
-Enter your Lichess API token and engine path
+# Enter your Lichess API token and engine path
 lichess_token = TokenTimeIsBackBuddyss
 engine_path = r"./stockfish"
 
-Check if the engine file exists
+# Check if the engine file exists
 if not os.path.exists(engine_path):
 print("ERROR: Engine file does not exist! Check the path.")
 exit(1)
