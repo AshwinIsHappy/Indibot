@@ -12,8 +12,8 @@ engine_path = r"./engines/stockfish"
 
 # Check if the engine file exists
 if not os.path.exists(engine_path):
-print("ERROR: Engine file does not exist! Check the path.")
-exit(1)
+  print("ERROR: Engine file does not exist! Check the path.")
+  exit(1)
 
 session = berserk.TokenSession(lichess_token)
 client = berserk.Client(session)
