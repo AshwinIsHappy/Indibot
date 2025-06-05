@@ -103,21 +103,6 @@ def get_engine_move(engine, board, think_time=0.05):
         print(f"⚠️ Engine error: {e}")
     return None
 
-def calc_think_time(board, my_remaining_time, limit, increment):
-    # Botli-inspired time management
-    min_time = 0.05  # never less than this (in seconds)
-    max_time = 8.0   # never more than this (in seconds)
-    buffer = 1.5     # always keep at least this much time left (in seconds)
-    moves_to_go = 35 - board.fullmove_number
-    moves_to_go = max(10, moves_to_go)
-    time_left = max(0, my_remaining_time / 1000.0 - buffer)
-    if increment > 0:
-        base = min(time_left / moves_to_go + increment * 0.7, time_left)
-    else:
-        base = min(time_left / moves_to_go, time_left)
-    think_time = max(min_time, min(base, max_time, time_left))
-    return think_time
-
 def handle_game(game_id, engine_path, client, limit=300, increment=0):
     print(f"Starting game with ID: {game_id} (limit={limit}, increment={increment})")
 
@@ -236,14 +221,53 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
 
         if board.turn == bot_color:
             print("Bot's turn, generating move...")
+
+            # === TIME MANAGEMENT BLOCK ===
+            # This is your requested block, exactly as you wrote it
+            try:
+                raw_time = event["wtime"] if bot_color == chess.WHITE else event["btime"]
+                if isinstance(raw_time, datetime):
+                    bot_time = (raw_time - datetime(1970, 1, 1, tzinfo=raw_time.tzinfo)).total_seconds()
+                elif isinstance(raw_time, int):
+                    bot_time = raw_time / 1000
+                else:
+                    raise ValueError("Unknown time format")
+            except Exception as e:
+                print(f"⚠️ Error getting time: {e}, defaulting to 10 seconds.")
+                bot_time = 10
+
+            if bot_time > 900:
+                think_time = 30
+            elif bot_time > 600:
+                think_time = 20
+            elif bot_time > 300:
+                think_time = 15
+            elif bot_time > 180:
+                think_time = 10
+            elif bot_time > 120:
+                think_time = 3.5
+            elif bot_time > 90:
+                think_time = 2
+            elif bot_time > 60:
+                think_time = 1
+            elif bot_time > 30:
+                think_time = 0.5
+            elif bot_time > 10:
+                think_time = 0.3
+            elif bot_time > 5:
+                think_time = 0.2
+            else:
+                think_time = 0.1
+
+            print(f"🕒 Remaining time: {bot_time}s, thinking time set to: {think_time}s")
+
+            # === MOVE SELECTION LOGIC ===
             move = None
             if len(board.piece_map()) == 5:
                 move = get_syzygy_move(board)
             if move is None:
                 move = get_polyglot_move(board)
             if move is None:
-                think_time = calc_think_time(board, my_remaining_time, limit, increment)
-                print(f"⏱️ Using think_time={think_time:.2f} seconds (botli-style TM)")
                 move = get_engine_move(engine, board, think_time=think_time)
             if move:
                 try:
