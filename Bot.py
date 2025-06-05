@@ -99,8 +99,8 @@ def get_engine_move(engine, board, think_time=0.1):
         print(f"Engine error: {e}")
     return None
 
-def handle_game(game_id, engine_path, client):
-    print(f"Starting game with ID: {game_id}")
+def handle_game(game_id, engine_path, client, limit=300, increment=0):
+    print(f"Starting game with ID: {game_id} (limit={limit}, increment={increment})")
 
     try:
         engine = chess.engine.SimpleEngine.popen_uci(engine_path)
@@ -111,6 +111,7 @@ def handle_game(game_id, engine_path, client):
 
     game_details = None
     board = chess.Board()
+    my_remaining_time = limit * 1000  # fallback: base time in ms
 
     for event in client.bots.stream_game_state(game_id):
         # Handle chat commands
@@ -155,6 +156,12 @@ def handle_game(game_id, engine_path, client):
                         board.push_uci(move)
                     except Exception as e:
                         print(f"Error applying move {move}: {e}")
+
+            # Parse clocks (milliseconds)
+            if board.turn == chess.WHITE:
+                my_remaining_time = event.get("wtime", my_remaining_time)
+            else:
+                my_remaining_time = event.get("btime", my_remaining_time)
 
         elif event.get("type") == "offerDraw":
             print("Opponent offered a draw.")
@@ -205,15 +212,26 @@ def handle_game(game_id, engine_path, client):
 
         if board.turn == bot_color:
             print("Bot's turn, generating move...")
-
-            # Try Syzygy tablebase for perfect endgame play
             move = get_syzygy_move(board)
             if move is None:
-                # Try opening book
                 move = get_polyglot_move(board)
             if move is None:
-                # Use engine with short think time for fast response
-                move = get_engine_move(engine, board, think_time=0.1)
+                # --- Improved Think Time Logic using real clock ---
+                ms_left = my_remaining_time if my_remaining_time else limit * 1000
+                sec_left = ms_left / 1000
+
+                # Estimate moves left, but never use less than 10 remaining moves for safety
+                moves_left = max(10, 40 - board.fullmove_number)
+
+                # Use 0.9 of time budgeted for this move, plus most of the increment
+                think_time = min(
+                    max(0.1, 0.9 * sec_left / moves_left + increment * 0.8),
+                    sec_left - 0.1
+                )
+                think_time = max(0.05, min(think_time, 30))  # clamp for safety
+
+                print(f"Using think_time={think_time:.2f} seconds (real clock: {sec_left:.2f}s, moves left: {moves_left}, increment: {increment})")
+                move = get_engine_move(engine, board, think_time=think_time)
             if move:
                 try:
                     client.bots.make_move(game_id, move.uci())
@@ -279,7 +297,8 @@ def listen_for_challenges():
             elif event.get("type") == "gameStart":
                 game_id = event["game"]["id"]
                 print(f"Starting game: {game_id}")
-                threading.Thread(target=handle_game, args=(game_id, engine_path, client)).start()
+                # Pass limit and increment to the game handler for dynamic time management
+                threading.Thread(target=handle_game, args=(game_id, engine_path, client, limit, increment)).start()
 
         time.sleep(1)
 
