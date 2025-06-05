@@ -1,8 +1,6 @@
 import berserk
 import chess
 import chess.engine
-import chess.polyglot
-import chess.syzygy
 import threading
 import time
 import os
@@ -12,16 +10,18 @@ lichess_token = "TokenTimeIsBackBuddyss"
 engine_path = r"./engines/stockfish"
 bot_username = "indibot"
 
-# === POLYGLOT BOOK CONFIGURATION ===
 polyglot_book_paths = [
     "./book1.bin",
     "./book2.bin",
     "./book3.bin"
 ]
 
-# === SYZYGY TABLEBASE CONFIGURATION ===
 syzygy_path = "./syzygy"
-syzygy = chess.syzygy.open_tablebase(syzygy_path) if os.path.exists(syzygy_path) else None
+try:
+    import chess.syzygy
+    syzygy = chess.syzygy.open_tablebase(syzygy_path) if os.path.exists(syzygy_path) else None
+except ImportError:
+    syzygy = None
 
 COMMAND_RESPONSES = {
     "!about": "🤖 This is a chess bot powered by Stockfish and Python. Created by @che947. ♟️",
@@ -37,7 +37,6 @@ if not os.path.exists(engine_path):
 session = berserk.TokenSession(lichess_token)
 client = berserk.Client(session)
 
-# Store game_id -> (limit, increment) for challenge/gameStart association
 game_time_controls = {}
 
 def handle_chat_commands(game_id, username, text):
@@ -50,7 +49,8 @@ def handle_chat_commands(game_id, username, text):
             print(f"⚠️ Error sending chat command response: {e}")
 
 def get_syzygy_move(board):
-    if syzygy is None or len(board.piece_map()) > 7 or not board.is_valid() or board.is_game_over(claim_draw=False):
+    # Only use syzygy if exactly 5 pieces on the board
+    if syzygy is None or len(board.piece_map()) != 5 or not board.is_valid() or board.is_game_over(claim_draw=False):
         return None
     try:
         best_move = None
@@ -77,6 +77,7 @@ def get_polyglot_move(board):
         if not os.path.exists(book_path):
             continue
         try:
+            import chess.polyglot
             with chess.polyglot.open_reader(book_path) as reader:
                 for entry in reader.find_all(board):
                     if entry.weight > best_weight:
@@ -90,7 +91,7 @@ def get_polyglot_move(board):
         return best_move
     return None
 
-def get_engine_move(engine, board, think_time=0.1):
+def get_engine_move(engine, board, think_time=0.05):
     try:
         result = engine.play(board, chess.engine.Limit(time=think_time))
         if result.move:
@@ -99,6 +100,21 @@ def get_engine_move(engine, board, think_time=0.1):
     except Exception as e:
         print(f"⚠️ Engine error: {e}")
     return None
+
+def calc_think_time(board, my_remaining_time, limit, increment):
+    # Botli-inspired time management
+    min_time = 0.05  # never less than this (in seconds)
+    max_time = 8.0   # never more than this (in seconds)
+    buffer = 1.5     # always keep at least this much time left (in seconds)
+    moves_to_go = 35 - board.fullmove_number
+    moves_to_go = max(10, moves_to_go)
+    time_left = max(0, my_remaining_time / 1000.0 - buffer)
+    if increment > 0:
+        base = min(time_left / moves_to_go + increment * 0.7, time_left)
+    else:
+        base = min(time_left / moves_to_go, time_left)
+    think_time = max(min_time, min(base, max_time, time_left))
+    return think_time
 
 def handle_game(game_id, engine_path, client, limit=300, increment=0):
     print(f"🎲 Starting game with ID: {game_id} (limit={limit}, increment={increment})")
@@ -112,10 +128,9 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
 
     game_details = None
     board = chess.Board()
-    my_remaining_time = int(limit) * 1000  # fallback: base time in ms
+    my_remaining_time = int(limit) * 1000
 
     for event in client.bots.stream_game_state(game_id):
-        # Handle chat commands
         if event.get("type") == "chatLine":
             username = event.get("username", "")
             text = event.get("text", "")
@@ -158,7 +173,6 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
                     except Exception as e:
                         print(f"⚠️ Error applying move {move}: {e}")
 
-            # Parse clocks (milliseconds)
             try:
                 if board.turn == chess.WHITE:
                     wtime = event.get("wtime", None)
@@ -221,26 +235,14 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
 
         if board.turn == bot_color:
             print("🤔 Bot's turn, generating move...")
-            move = get_syzygy_move(board)
+            move = None
+            if len(board.piece_map()) == 5:
+                move = get_syzygy_move(board)
             if move is None:
                 move = get_polyglot_move(board)
             if move is None:
-                # --- Faster Think Time Logic ---
-                try:
-                    ms_left = int(my_remaining_time) if my_remaining_time is not None else int(limit) * 1000
-                except Exception:
-                    ms_left = int(limit) * 1000
-                if not isinstance(ms_left, (int, float)):
-                    print(f"⚠️ Warning: ms_left is {ms_left}, resetting to default.")
-                    ms_left = int(limit) * 1000
-                sec_left = ms_left / 1000
-
-                # Use a more aggressive time allocation: assume 10 moves left, max 1s per move, min 0.05s
-                moves_left = max(5, 10 - board.fullmove_number // 10)
-                base_think = sec_left / (moves_left + 1)
-                think_time = min(max(0.05, base_think + increment * 0.7), 1.0, sec_left - 0.05)
-                think_time = max(0.05, think_time)
-                print(f"⏱️ Using think_time={think_time:.2f} seconds (real clock: {sec_left:.2f}s, moves left: {moves_left}, increment: {increment})")
+                think_time = calc_think_time(board, my_remaining_time, limit, increment)
+                print(f"⏱️ Using think_time={think_time:.2f} seconds (botli-style TM)")
                 move = get_engine_move(engine, board, think_time=think_time)
             if move:
                 try:
@@ -252,9 +254,6 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
                 continue
             else:
                 print("❌ No move found!")
-
-        # Artificial sleep removed to ensure no fake thinking.
-        # time.sleep(0.05)
 
     engine.quit()
 
