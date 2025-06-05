@@ -225,7 +225,7 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
             if move is None:
                 move = get_polyglot_move(board)
             if move is None:
-                # --- Improved Think Time Logic using real clock ---
+                # --- Faster Think Time Logic ---
                 try:
                     ms_left = int(my_remaining_time) if my_remaining_time is not None else int(limit) * 1000
                 except Exception:
@@ -235,12 +235,11 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
                     ms_left = int(limit) * 1000
                 sec_left = ms_left / 1000
 
-                moves_left = max(10, 40 - board.fullmove_number)
-                think_time = min(
-                    max(0.1, 0.9 * sec_left / moves_left + increment * 0.8),
-                    sec_left - 0.1
-                )
-                think_time = max(0.05, min(think_time, 30))
+                # Use a more aggressive time allocation: assume 10 moves left, max 1s per move, min 0.05s
+                moves_left = max(5, 10 - board.fullmove_number // 10)
+                base_think = sec_left / (moves_left + 1)
+                think_time = min(max(0.05, base_think + increment * 0.7), 1.0, sec_left - 0.05)
+                think_time = max(0.05, think_time)
                 print(f"⏱️ Using think_time={think_time:.2f} seconds (real clock: {sec_left:.2f}s, moves left: {moves_left}, increment: {increment})")
                 move = get_engine_move(engine, board, think_time=think_time)
             if move:
@@ -254,7 +253,8 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
             else:
                 print("❌ No move found!")
 
-        time.sleep(0.05)
+        # Artificial sleep removed to ensure no fake thinking.
+        # time.sleep(0.05)
 
     engine.quit()
 
