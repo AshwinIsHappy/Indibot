@@ -4,18 +4,21 @@ import chess.engine
 import threading
 import time
 import os
+from datetime import datetime
 
 # === USER CONFIGURATION ===
 lichess_token = "TokenTimeIsBackBuddyss"
 engine_path = r"./engines/stockfish"
 bot_username = "indibot"
 
+# === POLYGLOT BOOK CONFIGURATION ===
 polyglot_book_paths = [
     "./book1.bin",
     "./book2.bin",
     "./book3.bin"
 ]
 
+# === SYZYGY TABLEBASE CONFIGURATION ===
 syzygy_path = "./syzygy"
 try:
     import chess.syzygy
@@ -30,14 +33,13 @@ COMMAND_RESPONSES = {
     "!owner": "🧑‍💻 My owner is @wannabegmonce."
 }
 
+# Check if the engine file exists
 if not os.path.exists(engine_path):
-    print("❌ ERROR: Engine file does not exist! Check the path.")
+    print("ERROR: Engine file does not exist! Check the path.")
     exit(1)
 
 session = berserk.TokenSession(lichess_token)
 client = berserk.Client(session)
-
-game_time_controls = {}
 
 def handle_chat_commands(game_id, username, text):
     text = text.strip()
@@ -117,20 +119,22 @@ def calc_think_time(board, my_remaining_time, limit, increment):
     return think_time
 
 def handle_game(game_id, engine_path, client, limit=300, increment=0):
-    print(f"🎲 Starting game with ID: {game_id} (limit={limit}, increment={increment})")
+    print(f"Starting game with ID: {game_id} (limit={limit}, increment={increment})")
 
     try:
         engine = chess.engine.SimpleEngine.popen_uci(engine_path)
-        print("🚀 Engine started successfully!")
+        print("Engine started successfully!")
     except Exception as e:
-        print("❌ Error while starting engine:", e)
+        print("Error while starting engine:", e)
         return
 
     game_details = None
     board = chess.Board()
-    my_remaining_time = int(limit) * 1000
+    my_remaining_time = int(limit) * 1000  # fallback: base time in ms
 
     for event in client.bots.stream_game_state(game_id):
+        print("Received event:", event)
+
         if event.get("type") == "chatLine":
             username = event.get("username", "")
             text = event.get("text", "")
@@ -142,7 +146,6 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
             game_details = event
             variant_name = event.get("variant", {}).get("name", "")
             initial_fen = event.get("initialFen", chess.STARTING_FEN)
-
             if variant_name == "Chess960":
                 board = chess.Board(fen=initial_fen, chess960=True)
             else:
@@ -154,24 +157,22 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
                     try:
                         board.push_uci(move)
                     except Exception as e:
-                        print(f"⚠️ Error applying initial move {move}: {e}")
+                        print(f"🔴 Error applying initial move {move}: {e}")
 
         elif event.get("type") == "gameState":
             moves_str = event.get("moves", "")
             if moves_str and game_details:
                 variant_name = game_details.get("variant", {}).get("name", "")
                 initial_fen = game_details.get("initialFen", chess.STARTING_FEN)
-
                 if variant_name == "Chess960":
                     board = chess.Board(fen=initial_fen, chess960=True)
                 else:
                     board = chess.Board()
-
                 for move in moves_str.split():
                     try:
                         board.push_uci(move)
                     except Exception as e:
-                        print(f"⚠️ Error applying move {move}: {e}")
+                        print(f"🔴 Error applying move {move}: {e}")
 
             try:
                 if board.turn == chess.WHITE:
@@ -203,11 +204,11 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
                     print("⚠️ Position leads to mate – declining draw.")
                     client.bots.decline_draw(game_id)
                 elif score.score() <= 30:
-                    print(f"👏 Acceptable draw ({score.score()} cp) – accepting.")
+                    print(f"✅ Acceptable draw ({score.score()} cp) – accepting.")
                     client.bots.accept_draw(game_id)
                     break
                 else:
-                    print(f"❌ Unfavorable draw ({score.score()} cp) – declining.")
+                    print(f"🚫 Unfavorable draw ({score.score()} cp) – declining.")
                     client.bots.decline_draw(game_id)
             except Exception as e:
                 print(f"⚠️ Error evaluating position for draw: {e}")
@@ -218,7 +219,7 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
             continue
 
         if event.get("status") in ["mate", "resign", "draw", "outoftime"]:
-            print("🏁 Game is over, bot will not make a move.")
+            print("Game is over, bot will not make a move.")
             break
 
         if game_details:
@@ -227,14 +228,14 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
             elif game_details["black"]["id"].lower() == bot_username.lower():
                 bot_color = chess.BLACK
             else:
-                print("❗ Bot is not a participant in this game.")
+                print("Bot is not a participant in this game.")
                 continue
         else:
-            print("❗ No game details available.")
+            print("No game details available.")
             continue
 
         if board.turn == bot_color:
-            print("🤔 Bot's turn, generating move...")
+            print("Bot's turn, generating move...")
             move = None
             if len(board.piece_map()) == 5:
                 move = get_syzygy_move(board)
@@ -254,6 +255,10 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
                 continue
             else:
                 print("❌ No move found!")
+        else:
+            print("⏳ Waiting for opponent's move.")
+
+        time.sleep(0.1)
 
     engine.quit()
 
@@ -261,14 +266,14 @@ def keep_alive_ping(client):
     while True:
         try:
             client.account.get()
-            print("📡 Ping to Lichess sent (keep-alive).")
+            print("✅ Ping to Lichess sent (keep-alive).")
         except Exception as e:
             print(f"⚠️ Error during Lichess ping: {e}")
-        time.sleep(300)
+        time.sleep(300) # every 5 minutes
 
 def listen_for_challenges():
     allowed_variants = {"standard", "chess960"}
-
+    game_time_controls = {}
     while True:
         event_stream = client.bots.stream_incoming_events()
         for event in event_stream:
@@ -276,44 +281,38 @@ def listen_for_challenges():
                 challenge = event["challenge"]
                 challenger_id = challenge.get("challenger", {}).get("id", "").lower()
                 challenge_id = challenge["id"]
-
                 variant_key = challenge.get("variant", {}).get("key", "")
                 if variant_key not in allowed_variants:
                     print(f"❌ Declining challenge {challenge_id}: disallowed variant ({variant_key})")
                     continue
-
                 if challenge.get("rated", True):
                     print(f"❌ Declining challenge {challenge_id}: rated games not accepted")
                     continue
-
                 time_control = challenge.get("timeControl", {})
                 limit = time_control.get("limit", 0)
                 increment = time_control.get("increment", 0)
                 game_time_controls[challenge_id] = (limit, increment)
-
                 if not (30 <= limit <= 300 and increment <= 0):
                     print(f"❌ Declining challenge {challenge_id}: disallowed time control ({limit}s +{increment})")
                     continue
-
                 if challenger_id == bot_username.lower():
-                    print(f"ℹ️ Challenge created by bot (ID: {challenge_id}), ignoring.")
+                    print(f"⚠️ Challenge created by bot (ID: {challenge_id}), ignoring.")
                     continue
-
                 try:
                     client.bots.accept_challenge(challenge_id)
-                    print(f"✅ Accepting challenge {challenge_id} (variant: {variant_key})")
+                    print(f"🟢 Accepting challenge {challenge_id} (variant: {variant_key})")
                 except berserk.exceptions.ResponseError as e:
-                    print(f"⚠️ Error accepting challenge {challenge_id}: {e}")
+                    print(f"❌ Error accepting challenge {challenge_id}: {e}")
 
             elif event.get("type") == "gameStart":
                 game_id = event["game"]["id"]
-                print(f"🕹️ Starting game: {game_id}")
+                print(f"🔵 Starting game: {game_id}")
                 limit, increment = game_time_controls.get(game_id, (300, 0))
                 threading.Thread(target=handle_game, args=(game_id, engine_path, client, limit, increment)).start()
 
         time.sleep(1)
 
 if __name__ == "__main__":
-    print("♟️ Chess bot started! Good luck, have fun! 🎉")
+    print("♟️ Chess bot started!")
     threading.Thread(target=keep_alive_ping, args=(client,), daemon=True).start()
     listen_for_challenges()
