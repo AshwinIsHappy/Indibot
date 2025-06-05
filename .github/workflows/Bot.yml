@@ -33,7 +33,7 @@ jobs:
         uses: py-actions/py-dependency-install@v4.0.0
         
       - name: Injection For my Repo
-        run: sed -i "s/TokenTimeIsBackBuddyss/${{ secrets.LICHESS_KEY }}/g" Bot.py
+        run: sed -i "s/"TokenTimeIsBackBuddyss"/${{ secrets.LICHESS_KEY }}/g" Bot.py
           
       - name: Stockfish
         run: |
