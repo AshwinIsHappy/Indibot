@@ -45,8 +45,9 @@ def handle_chat_commands(game_id, username, text):
     text = text.strip()
     if text in COMMAND_RESPONSES:
         try:
-            client.bots.post_message(game_id, COMMAND_RESPONSES[text])
-            print(f"💬 Replied to command {text} in game {game_id}")
+            # Always post to the spectator room
+            client.bots.post_message(game_id, COMMAND_RESPONSES[text], room="spectator")
+            print(f"💬 Replied to command {text} in SPECTATOR room for game {game_id}")
         except Exception as e:
             print(f"⚠️ Error sending chat command response: {e}")
 
