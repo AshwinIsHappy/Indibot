@@ -6,7 +6,6 @@ import chess.syzygy
 import threading
 import time
 import os
-from datetime import datetime
 
 # === USER CONFIGURATION ===
 lichess_token = "TokenTimeIsBackBuddyss"
@@ -38,6 +37,9 @@ if not os.path.exists(engine_path):
 session = berserk.TokenSession(lichess_token)
 client = berserk.Client(session)
 
+# Store game_id -> (limit, increment) for challenge/gameStart association
+game_time_controls = {}
+
 def handle_chat_commands(game_id, username, text):
     text = text.strip()
     if text in COMMAND_RESPONSES:
@@ -48,7 +50,6 @@ def handle_chat_commands(game_id, username, text):
             print(f"Error sending chat command response: {e}")
 
 def get_syzygy_move(board):
-    # Only probe if board has 7 or fewer pieces, is valid, and not over
     if syzygy is None or len(board.piece_map()) > 7 or not board.is_valid() or board.is_game_over(claim_draw=False):
         return None
     try:
@@ -57,7 +58,7 @@ def get_syzygy_move(board):
         for move, info in syzygy.probe_root(board):
             wdl = info.wdl if board.turn == chess.WHITE else -info.wdl
             dtz = -info.dtz() if info.dtz() is not None else 0
-            score = (wdl * 1000) + dtz  # Prioritize WDL, break ties with DTZ
+            score = (wdl * 1000) + dtz
             if score > best_score:
                 best_score = score
                 best_move = move
@@ -80,7 +81,7 @@ def get_polyglot_move(board):
                 for entry in reader.find_all(board):
                     if entry.weight > best_weight:
                         best_weight = entry.weight
-                        best_move = entry.move()
+                        best_move = entry.move  # CORRECT: entry.move is a property
                         best_book = book_path
         except Exception as e:
             print(f"Polyglot book error in {book_path}: {e}")
@@ -216,20 +217,14 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
             if move is None:
                 move = get_polyglot_move(board)
             if move is None:
-                # --- Improved Think Time Logic using real clock ---
                 ms_left = my_remaining_time if my_remaining_time else limit * 1000
                 sec_left = ms_left / 1000
-
-                # Estimate moves left, but never use less than 10 remaining moves for safety
                 moves_left = max(10, 40 - board.fullmove_number)
-
-                # Use 0.9 of time budgeted for this move, plus most of the increment
                 think_time = min(
                     max(0.1, 0.9 * sec_left / moves_left + increment * 0.8),
                     sec_left - 0.1
                 )
-                think_time = max(0.05, min(think_time, 30))  # clamp for safety
-
+                think_time = max(0.05, min(think_time, 30))
                 print(f"Using think_time={think_time:.2f} seconds (real clock: {sec_left:.2f}s, moves left: {moves_left}, increment: {increment})")
                 move = get_engine_move(engine, board, think_time=think_time)
             if move:
@@ -279,6 +274,7 @@ def listen_for_challenges():
                 time_control = challenge.get("timeControl", {})
                 limit = time_control.get("limit", 0)
                 increment = time_control.get("increment", 0)
+                game_time_controls[challenge_id] = (limit, increment)
 
                 if not (30 <= limit <= 300 and increment <= 0):
                     print(f"Declining challenge {challenge_id}: disallowed time control ({limit}s +{increment})")
@@ -297,7 +293,7 @@ def listen_for_challenges():
             elif event.get("type") == "gameStart":
                 game_id = event["game"]["id"]
                 print(f"Starting game: {game_id}")
-                # Pass limit and increment to the game handler for dynamic time management
+                limit, increment = game_time_controls.get(game_id, (300, 0))
                 threading.Thread(target=handle_game, args=(game_id, engine_path, client, limit, increment)).start()
 
         time.sleep(1)
