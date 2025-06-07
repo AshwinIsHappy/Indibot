@@ -41,18 +41,16 @@ if not os.path.exists(engine_path):
 session = berserk.TokenSession(lichess_token)
 client = berserk.Client(session)
 
-def handle_chat_commands(game_id, username, text):
+def handle_chat_commands(game_id, username, text, room="player"):
     text = text.strip()
     if text in COMMAND_RESPONSES:
         try:
-            # Always post to the spectator room
-            client.bots.post_message(game_id, COMMAND_RESPONSES[text], room="spectator")
-            print(f"💬 Replied to command {text} in SPECTATOR room for game {game_id}")
+            client.bots.post_message(game_id, COMMAND_RESPONSES[text], room=room)
+            print(f"💬 Replied to command {text} in {room.upper()} room for game {game_id}")
         except Exception as e:
-            print(f"⚠️ Error sending chat command response: {e}")
+            print(f"⚠️ Error sending chat command response to {room.upper()} room: {e}")
 
 def get_syzygy_move(board):
-    # Only use syzygy if exactly 5 pieces on the board
     if syzygy is None or len(board.piece_map()) != 5 or not board.is_valid() or board.is_game_over(claim_draw=False):
         return None
     try:
@@ -124,8 +122,9 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
         if event.get("type") == "chatLine":
             username = event.get("username", "")
             text = event.get("text", "")
+            room = event.get("room", "player")  # Get the room from the event, default to player
             if username.lower() != bot_username.lower():
-                handle_chat_commands(game_id, username, text)
+                handle_chat_commands(game_id, username, text, room=room)
             continue
 
         if event.get("type") == "gameFull":
@@ -200,7 +199,7 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
                 print(f"⚠️ Error evaluating position for draw: {e}")
                 try:
                     client.bots.decline_draw(game_id)
-                except:
+                except Exception:
                     pass
             continue
 
@@ -224,7 +223,6 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
             print("Bot's turn, generating move...")
 
             # === TIME MANAGEMENT BLOCK ===
-            # This is your requested block, exactly as you wrote it
             try:
                 raw_time = event["wtime"] if bot_color == chess.WHITE else event["btime"]
                 if isinstance(raw_time, datetime):
