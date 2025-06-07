@@ -281,8 +281,6 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
         else:
             print("⏳ Waiting for opponent's move.")
 
-        time.sleep(0.1)
-
     engine.quit()
 
 def keep_alive_ping(client):
