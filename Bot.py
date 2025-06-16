@@ -57,23 +57,13 @@ def handle_chat_commands(game_id, username, text, room="player"):
 
 # ---- SMART LADDER TIME CONTROL ----
 def classic_ladder_think_time(my_remaining_time, increment=0):
-    """
-    Improved ladder time control: never more than 60s, never less than 0.05s, always leaves 2s buffer.
-    my_remaining_time: ms left
-    increment: increment in seconds (int)
-    Returns think_time in seconds (float)
-    """
-    # Convert ms to seconds
     time_left = max(my_remaining_time / 1000.0, 0)
-    # Always leave at least 2 seconds
     time_left = max(time_left - 2, 0.05)
-    # If increment, use a bit more (capped)
     if increment >= 3:
         think_time = min(time_left * 0.04 + increment * 0.25, 60)
     elif increment > 0:
         think_time = min(time_left * 0.025 + increment * 0.18, 10)
     else:
-        # No increment: be more conservative
         if time_left > 900:
             think_time = 30
         elif time_left > 600:
@@ -96,7 +86,6 @@ def classic_ladder_think_time(my_remaining_time, increment=0):
             think_time = 0.1
         else:
             think_time = 0.05
-    # Clamp to min/max bounds
     return max(0.05, min(think_time, 60))
 
 # ---- LOGGING SETUP ----
@@ -112,18 +101,6 @@ if not os.path.exists(engine_path):
 
 session = berserk.TokenSession(lichess_token)
 client = berserk.Client(session)
-
-# --- ENGINE POOLING ---
-ENGINE_POOL_SIZE = 2
-engine_pool = Queue(maxsize=ENGINE_POOL_SIZE)
-for _ in range(ENGINE_POOL_SIZE):
-    engine_pool.put(chess.engine.SimpleEngine.popen_uci(engine_path))
-
-def get_engine():
-    return engine_pool.get()
-
-def release_engine(engine):
-    engine_pool.put(engine)
 
 # --- POLYGLOT BOOK CACHING ---
 book_cache = []
@@ -155,14 +132,12 @@ def get_syzygy_move(board):
 def get_polyglot_move(board):
     best_move = None
     best_weight = -1
-    best_book = None
     for reader in book_cache:
         try:
             for entry in reader.find_all(board):
                 if entry.weight > best_weight:
                     best_weight = entry.weight
                     best_move = entry.move
-                    best_book = reader
         except Exception as e:
             logging.warning(f"Polyglot book error: {e}")
     if best_move:
@@ -176,13 +151,15 @@ def get_engine_move(engine, board, think_time=0.05):
         if result.move:
             logging.info(f"Engine played: {result.move.uci()}")
             return result.move
+    except chess.engine.EngineTerminatedError:
+        logging.error("Engine process died. Exiting game handler.")
+        raise  # Will be caught in handle_game
     except Exception as e:
         logging.warning(f"Engine error: {e}")
     return None
 
-def handle_game(game_id, engine_path, client, limit=300, increment=0):
+def handle_game(game_id, engine, client, limit=300, increment=0):
     logging.info(f"Starting game with ID: {game_id} (limit={limit}, increment={increment})")
-    engine = get_engine()
     try:
         board = chess.Board()
         my_remaining_time = int(limit) * 1000
@@ -301,7 +278,11 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
                 if move is None:
                     move = get_polyglot_move(board)
                 if move is None:
-                    move = get_engine_move(engine, board, think_time=think_time)
+                    try:
+                        move = get_engine_move(engine, board, think_time=think_time)
+                    except chess.engine.EngineTerminatedError:
+                        logging.error("Engine event loop dead. Exiting game handler.")
+                        return
                 if move:
                     try:
                         client.bots.make_move(game_id, move.uci())
@@ -317,8 +298,7 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
                 logging.info("Waiting for opponent's move.")
 
     finally:
-        engine.quit()
-        release_engine(engine)
+        logging.info("Game handler finished.")
 
 def keep_alive_ping(client):
     while True:
@@ -329,7 +309,7 @@ def keep_alive_ping(client):
             logging.warning(f"Error during Lichess ping: {e}")
         time.sleep(300)
 
-def listen_for_challenges():
+def listen_for_challenges(engine):
     allowed_variants = {"standard", "chess960"}
     game_time_controls = {}
     while True:
@@ -366,11 +346,16 @@ def listen_for_challenges():
                 game_id = event["game"]["id"]
                 logging.info(f"Starting game: {game_id}")
                 limit, increment = game_time_controls.get(game_id, (300, 0))
-                threading.Thread(target=handle_game, args=(game_id, engine_path, client, limit, increment), daemon=True).start()
+                threading.Thread(target=handle_game, args=(game_id, engine, client, limit, increment), daemon=True).start()
 
         time.sleep(1)
 
 if __name__ == "__main__":
     logging.info("Chess bot started!")
-    threading.Thread(target=keep_alive_ping, args=(client,), daemon=True).start()
-    listen_for_challenges()
+    engine = chess.engine.SimpleEngine.popen_uci(engine_path)
+    try:
+        threading.Thread(target=keep_alive_ping, args=(client,), daemon=True).start()
+        listen_for_challenges(engine)
+    finally:
+        engine.quit()
+        logging.info("Engine shut down.")
