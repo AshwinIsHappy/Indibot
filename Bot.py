@@ -29,7 +29,7 @@ try:
 except ImportError:
     syzygy = None
 
-# ---- COMMAND HANDLER: Embedded, robust, logs all steps ----
+# ---- COMMAND HANDLER ----
 COMMAND_RESPONSES = {
     "about": "🤖 This is a chess bot powered by Stockfish and Python. Created by @che947. ♟️",
     "name": "👋 My name is indibot.",
@@ -48,12 +48,30 @@ def handle_chat_commands(game_id, username, text, room="player"):
         logging.info(f"Matched command: {cmd}, response: {response}")
         if response:
             try:
-                client.bots.post_message(game_id, response, room=room)
+                client.bots.post_message(game_id, response, room)
                 logging.info(f"Replied to command {t} in {room.upper()} room for game {game_id}")
             except Exception as e:
                 logging.warning(f"Error sending chat command response to {room.upper()} room: {e}")
         return
     logging.info("No matching command.")
+
+# ---- SMART TIME CONTROL ----
+def choose_think_time(bot_time, increment=0, moves_to_go=30):
+    """
+    Choose a smart think time for this move.
+    bot_time : milliseconds left for bot
+    increment: increment per move in seconds
+    moves_to_go: estimated moves left in the game
+    Returns think_time in seconds.
+    """
+    bot_time = max(bot_time / 1000, 0)
+    increment = max(increment, 0)
+    safe_time = max(bot_time - 2, 0.01)
+    moves_left = max(moves_to_go, 10)
+    increment_bonus = 0.5 * increment
+    base = safe_time / moves_left + increment_bonus
+    think_time = min(max(base, 0.2), 2.5)
+    return think_time
 
 # ---- LOGGING SETUP ----
 logging.basicConfig(
@@ -187,11 +205,11 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
                 try:
                     if board.turn == chess.WHITE:
                         wtime = event.get("wtime", None)
-                        if wtime is not None:
+                        if wtime is not None and not isinstance(wtime, datetime):
                             my_remaining_time = int(wtime)
                     else:
                         btime = event.get("btime", None)
-                        if btime is not None:
+                        if btime is not None and not isinstance(btime, datetime):
                             my_remaining_time = int(btime)
                 except Exception as e:
                     logging.warning(f"Clock parse error: {e}")
@@ -247,42 +265,9 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
             if board.turn == bot_color:
                 logging.info("Bot's turn, generating move...")
 
-                try:
-                    raw_time = event["wtime"] if bot_color == chess.WHITE else event["btime"]
-                    if isinstance(raw_time, datetime):
-                        bot_time = (raw_time - datetime(1970, 1, 1, tzinfo=raw_time.tzinfo)).total_seconds()
-                    elif isinstance(raw_time, int):
-                        bot_time = raw_time / 1000
-                    else:
-                        raise ValueError("Unknown time format")
-                except Exception as e:
-                    logging.warning(f"Error getting time: {e}, defaulting to 10 seconds.")
-                    bot_time = 10
-
-                if bot_time > 900:
-                    think_time = 30
-                elif bot_time > 600:
-                    think_time = 20
-                elif bot_time > 300:
-                    think_time = 15
-                elif bot_time > 180:
-                    think_time = 10
-                elif bot_time > 120:
-                    think_time = 3.5
-                elif bot_time > 90:
-                    think_time = 2
-                elif bot_time > 60:
-                    think_time = 1
-                elif bot_time > 30:
-                    think_time = 0.5
-                elif bot_time > 10:
-                    think_time = 0.3
-                elif bot_time > 5:
-                    think_time = 0.2
-                else:
-                    think_time = 0.1
-
-                logging.info(f"Remaining time: {bot_time}s, thinking time set to: {think_time}s")
+                # --- SMARTER TIME CONTROL ---
+                think_time = choose_think_time(my_remaining_time, increment)
+                logging.info(f"Using think_time: {think_time:.3f}s (clock: {my_remaining_time/1000:.2f}s, increment: {increment}s)")
 
                 move = None
                 if len(board.piece_map()) == 5:
