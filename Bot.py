@@ -29,7 +29,7 @@ try:
 except ImportError:
     syzygy = None
 
-# Robust, extensible command handler with prefix and case flexibility
+# ---- COMMAND HANDLER: Embedded, robust, logs all steps ----
 COMMAND_RESPONSES = {
     "about": "🤖 This is a chess bot powered by Stockfish and Python. Created by @che947. ♟️",
     "name": "👋 My name is indibot.",
@@ -38,7 +38,24 @@ COMMAND_RESPONSES = {
 }
 COMMAND_REGEX = re.compile(r"^[!/\.](about|name|motor|owner)$", re.IGNORECASE)
 
-# Configure logging
+def handle_chat_commands(game_id, username, text, room="player"):
+    logging.info(f"handle_chat_commands called with: username={username}, text={repr(text)}, room={room}")
+    t = text.strip()
+    m = COMMAND_REGEX.match(t)
+    if m:
+        cmd = m.group(1).lower()
+        response = COMMAND_RESPONSES.get(cmd)
+        logging.info(f"Matched command: {cmd}, response: {response}")
+        if response:
+            try:
+                client.bots.post_message(game_id, response, room=room)
+                logging.info(f"Replied to command {t} in {room.upper()} room for game {game_id}")
+            except Exception as e:
+                logging.warning(f"Error sending chat command response to {room.upper()} room: {e}")
+        return
+    logging.info("No matching command.")
+
+# ---- LOGGING SETUP ----
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -70,20 +87,6 @@ for path in polyglot_book_paths:
     if os.path.exists(path):
         import chess.polyglot
         book_cache.append(chess.polyglot.open_reader(path))
-
-def handle_chat_commands(game_id, username, text, room="player"):
-    t = text.strip()
-    m = COMMAND_REGEX.match(t)
-    if m:
-        cmd = m.group(1).lower()
-        response = COMMAND_RESPONSES.get(cmd)
-        if response:
-            try:
-                client.bots.post_message(game_id, response, room=room)
-                logging.info(f"Replied to command {t} in {room.upper()} room for game {game_id}")
-            except Exception as e:
-                logging.warning(f"Error sending chat command response to {room.upper()} room: {e}")
-        return
 
 def get_syzygy_move(board):
     if syzygy is None or len(board.piece_map()) != 5 or not board.is_valid() or board.is_game_over(claim_draw=False):
@@ -149,6 +152,7 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
                 username = event.get("username", "")
                 text = event.get("text", "")
                 room = event.get("room", "player")
+                logging.info(f"Received chatLine: username={username}, text={repr(text)}, room={room}")
                 if username.lower() != bot_username.lower():
                     handle_chat_commands(game_id, username, text, room=room)
                 continue
