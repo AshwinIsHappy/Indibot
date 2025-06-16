@@ -55,23 +55,49 @@ def handle_chat_commands(game_id, username, text, room="player"):
         return
     logging.info("No matching command.")
 
-# ---- SMART TIME CONTROL ----
-def choose_think_time(bot_time, increment=0, moves_to_go=30):
+# ---- SMART LADDER TIME CONTROL ----
+def classic_ladder_think_time(my_remaining_time, increment=0):
     """
-    Choose a smart think time for this move.
-    bot_time : milliseconds left for bot
-    increment: increment per move in seconds
-    moves_to_go: estimated moves left in the game
-    Returns think_time in seconds.
+    Improved ladder time control: never more than 60s, never less than 0.05s, always leaves 2s buffer.
+    my_remaining_time: ms left
+    increment: increment in seconds (int)
+    Returns think_time in seconds (float)
     """
-    bot_time = max(bot_time / 1000, 0)
-    increment = max(increment, 0)
-    safe_time = max(bot_time - 2, 0.01)
-    moves_left = max(moves_to_go, 10)
-    increment_bonus = 0.5 * increment
-    base = safe_time / moves_left + increment_bonus
-    think_time = min(max(base, 0.2), 2.5)
-    return think_time
+    # Convert ms to seconds
+    time_left = max(my_remaining_time / 1000.0, 0)
+    # Always leave at least 2 seconds
+    time_left = max(time_left - 2, 0.05)
+    # If increment, use a bit more (capped)
+    if increment >= 3:
+        think_time = min(time_left * 0.04 + increment * 0.25, 60)
+    elif increment > 0:
+        think_time = min(time_left * 0.025 + increment * 0.18, 10)
+    else:
+        # No increment: be more conservative
+        if time_left > 900:
+            think_time = 30
+        elif time_left > 600:
+            think_time = 20
+        elif time_left > 300:
+            think_time = 10
+        elif time_left > 180:
+            think_time = 5
+        elif time_left > 120:
+            think_time = 2
+        elif time_left > 90:
+            think_time = 1.2
+        elif time_left > 60:
+            think_time = 0.8
+        elif time_left > 30:
+            think_time = 0.5
+        elif time_left > 10:
+            think_time = 0.2
+        elif time_left > 5:
+            think_time = 0.1
+        else:
+            think_time = 0.05
+    # Clamp to min/max bounds
+    return max(0.05, min(think_time, 60))
 
 # ---- LOGGING SETUP ----
 logging.basicConfig(
@@ -265,8 +291,8 @@ def handle_game(game_id, engine_path, client, limit=300, increment=0):
             if board.turn == bot_color:
                 logging.info("Bot's turn, generating move...")
 
-                # --- SMARTER TIME CONTROL ---
-                think_time = choose_think_time(my_remaining_time, increment)
+                # --- SMART LADDER TIME CONTROL USAGE ---
+                think_time = classic_ladder_think_time(my_remaining_time, increment)
                 logging.info(f"Using think_time: {think_time:.3f}s (clock: {my_remaining_time/1000:.2f}s, increment: {increment}s)")
 
                 move = None
