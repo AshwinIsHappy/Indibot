@@ -31,9 +31,9 @@ except ImportError:
 
 # ---- COMMAND HANDLER ----
 COMMAND_RESPONSES = {
-    "about": "🤖 This is a chess bot powered by Stockfish and Python. Created by @che947. ♟️",
+    "about": "🤖 This is a chess bot powered by Stockfish and Python. Created by @che947 and @treyop. ♟️",
     "name": "👋 My name is indibot.",
-    "motor": "⚡ I use the Stockfish chess engine.",
+    "motor": "⚡ I use the old Stockfish engine.",
     "owner": "🧑‍💻 My owner is @wannabegmonce.",
 }
 COMMAND_REGEX = re.compile(r"^[!/\.](about|name|motor|owner)$", re.IGNORECASE)
