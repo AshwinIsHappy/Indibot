@@ -1,0 +1,46 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Run bot
+
+# Controls when the workflow will run
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+    paths:
+      - "user_interface.py"
+  schedule:
+    - cron: "1 */5 * * *"
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v3
+
+      - name: Python Dependency Installation
+        uses: py-actions/py-dependency-install@v4.0.0
+        
+      - name: Injection For my Repo
+        run: sed -i "s/TokenTimeIsBackBuddyss/${{ secrets.LICHESS_KEY }}/g" config.yml
+          
+      - name: Stockfish
+        run: |
+          chmod +x ./engines/stockfish
+
+      - name: Running bot
+        run: python -u user_interface.py --matchmaking
